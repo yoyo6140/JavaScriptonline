@@ -1,1 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Splitwise 分帳小幫手</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 20px auto; }
+    h2 { border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+    .member, .expense { display: flex; justify-content: space-between; padding: 4px 0; }
+    .positive { color: green; }
+    .negative { color: red; }
+    button { margin: 5px 0; }
+    input, select { padding: 5px; margin: 3px 0; width: 100%; box-sizing: border-box; }
+    label { font-weight: bold; margin-top: 10px; display: block; }
+    .form-group { margin-bottom: 10px; }
+    .expense-item button { background: #f44336; color: white; border: none; padding: 2px 8px; cursor: pointer; }
+    .expense-item button:hover { background: #d32f2f; }
+  </style>
+</head>
+<body>
 
+  <h1>Splitwise 分帳小幫手</h1>
+
+  <section>
+    <h2>分帳成員</h2>
+    <div id="member-list"></div>
+    <input type="text" id="new-member-name" placeholder="輸入成員姓名" />
+    <button id="add-member-btn">新增成員</button>
+  </section>
+
+  <section>
+    <h2>新增支出款項</h2>
+    <div>
+      <label for="expense-name">款項名稱</label>
+      <input type="text" id="expense-name" placeholder="輸入款項名稱" />
+    </div>
+    <div>
+      <label for="expense-amount">款項金額</label>
+      <input type="number" id="expense-amount" placeholder="輸入金額" min="0" />
+    </div>
+    <div>
+      <label for="expense-payer">由誰付款</label>
+      <select id="expense-payer"></select>
+    </div>
+    <button id="add-expense-btn">新增支出</button>
+  </section>
+
+  <section>
+    <h2>帳款清單</h2>
+    <div id="expense-list"></div>
+  </section>
+
+  <section>
+    <h2>成員應付/應收</h2>
+    <div id="balance-list"></div>
+  </section>
+
+  <button id="clear-btn" style="background: #f44336; color: white; padding: 8px 12px; border: none; cursor: pointer;">旅程結束（清除所有資料）</button>
+
+<script>
+  // 讀取 localStorage
+  let members = JSON.parse(localStorage.getItem('splitwise_members')) || [];
+  let expenses = JSON.parse(localStorage.getItem('splitwise_expenses')) || [];
+
+  // 產生唯一ID
+  function generateId(prefix = '') {
+    return prefix + Math.random().toString(36).slice(2, 9);
+  }
+
+  const memberListDiv = document.getElementById('member-list');
+  const balanceListDiv = document.getElementById('balance-list');
+  const expenseListDiv = document.getElementById('expense-list');
+  const expensePayerSelect = document.getElementById('expense-payer');
+
+  // 渲染成員列表（含應付/應收）
+  function renderMembers() {
+    memberListDiv.innerHTML = '';
+    expensePayerSelect.innerHTML = '';
+
+    if (members.length === 0) {
+      memberListDiv.textContent = '尚無成員，請新增成員';
+      return;
+    }
+
+    // 更新支出付款人下拉選單
+    members.forEach(m => {
+      const option = document.createElement('option');
+      option.value = m.id;
+      option.textContent = m.name;
+      expensePayerSelect.appendChild(option);
+    });
+
+    // 計算金額
+    const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
+    const perPerson = members.length ? totalAmount / members.length : 0;
+
+    // 先付金額
+    const paidMap = {};
+    members.forEach(m => paidMap[m.id] = 0);
+    expenses.forEach(e => {
+      if(paidMap[e.paidBy] !== undefined) {
+        paidMap[e.paidBy] += e.amount;
+      }
+    });
+
+    // 清空畫面，依序列出成員和金額
+    members.forEach(m => {
+      const div = document.createElement('div');
+      div.classList.add('member');
+
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = m.name;
+
+      const balance = paidMap[m.id] - perPerson;
+      const balanceSpan = document.createElement('span');
+      balanceSpan.textContent = balance.toFixed(2);
+
+      if (balance > 0) {
+        balanceSpan.classList.add('positive');
+        balanceSpan.textContent = '應收 ' + balanceSpan.textContent;
+      } else if (balance < 0) {
+        balanceSpan.classList.add('negative');
+        balanceSpan.textContent = '應付 ' + Math.abs(balance).toFixed(2);
+      } else {
+        balanceSpan.textContent = '已結清';
+      }
+
+      div.appendChild(nameSpan);
+      div.appendChild(balanceSpan);
+      memberListDiv.appendChild(div);
+    });
+  }
+
+  // 渲染支出清單
+  function renderExpenses() {
+    expenseListDiv.innerHTML = '';
+    if (expenses.length === 0) {
+      expenseListDiv.textContent = '尚無支出記錄';
+      return;
+    }
+
+    expenses.forEach(exp => {
+      const div = document.createElement('div');
+      div.classList.add('expense-item', 'expense');
+      
+      const payer = members.find(m => m.id === exp.paidBy);
+      const payerName = payer ? payer.name : '未知';
+
+      div.innerHTML = `
+        <span>${exp.name} - ${exp.amount.toFixed(2)} 元 - 付款人：${payerName}</span>
+      `;
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '刪除';
+      delBtn.addEventListener('click', () => {
+        expenses = expenses.filter(e => e.id !== exp.id);
+        saveData();
+        renderExpenses();
+        renderMembers();
+      });
+
+      div.appendChild(delBtn);
+      expenseListDiv.appendChild(div);
+    });
+  }
+
+  // 儲存資料到 localStorage
+  function saveData() {
+    localStorage.setItem('splitwise_members', JSON.stringify(members));
+    localStorage.setItem('splitwise_expenses', JSON.stringify(expenses));
+  }
+
+  // 新增成員
+  document.getElementById('add-member-btn').addEventListener('click', () => {
+    const nameInput = document.getElementById('new-member-name');
+    const name = nameInput.value.trim();
+    if (!name) {
+      alert('請輸入成員姓名');
+      return;
+    }
+    members.push({ id: generateId('m'), name });
+    nameInput.value = '';
+    saveData();
+    renderMembers();
+    renderExpenses();
+  });
+
+  // 新增支出
+  document.getElementById('add-expense-btn').addEventListener('click', () => {
+    const nameInput = document.getElementById('expense-name');
+    const amountInput = document.getElementById('expense-amount');
+    const payerSelect = document.getElementById('expense-payer');
+
+    const name = nameInput.value.trim();
+    const amount = parseFloat(amountInput.value);
+    const paidBy = payerSelect.value;
+
+    if (!name) {
+      alert('請輸入款項名稱');
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      alert('請輸入正確的款項金額');
+      return;
+    }
+    if (!paidBy) {
+      alert('請選擇付款人');
+      return;
+    }
+
+    expenses.push({ id: generateId('e'), name, amount, paidBy });
+    nameInput.value = '';
+    amountInput.value = '';
+    payerSelect.value = members.length > 0 ? members[0].id : '';
+
+    saveData();
+    renderExpenses();
+    renderMembers();
+  });
+
+  // 旅程結束，清空所有資料
+  document.getElementById('clear-btn').addEventListener('click', () => {
+    if (confirm('確定要清除所有資料嗎？此動作無法復原。')) {
+      members = [];
+      expenses = [];
+      saveData();
+      renderMembers();
+      renderExpenses();
+    }
+  });
+
+  // 頁面載入時先渲染一次
+  renderMembers();
+  renderExpenses();
+
+</script>
+
+</body>
+</html>
